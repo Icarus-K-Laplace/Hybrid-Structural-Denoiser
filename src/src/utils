@@ -1,0 +1,56 @@
+import numpy as np
+import cv2
+
+def add_salt_pepper_noise(image, density=0.1, seed=None):
+    """
+    Add salt-and-pepper noise to an image.
+    
+    Args:
+        image (numpy.ndarray): Input image (grayscale).
+        density (float): Noise density (0.0 to 1.0).
+        seed (int): Random seed for reproducibility.
+        
+    Returns:
+        noisy (numpy.ndarray): Noisy image.
+        mask (numpy.ndarray): Binary mask (1 for noise, 0 for clean).
+    """
+    if seed is not None:
+        np.random.seed(seed)
+    
+    noisy = image.copy()
+    h, w = image.shape
+    n_noise = int(h * w * density)
+    
+    # Randomly choose noise coordinates
+    coords = np.random.permutation(h * w)[:n_noise]
+    rows, cols = np.unravel_index(coords, (h, w))
+    
+    # Half salt (255), half pepper (0)
+    n_salt = n_noise // 2
+    noisy[rows[:n_salt], cols[:n_salt]] = 255
+    noisy[rows[n_salt:], cols[n_salt:]] = 0
+    
+    # Create mask
+    mask = np.zeros((h, w), dtype=np.uint8)
+    mask[rows, cols] = 1
+    
+    return noisy, mask
+
+def calculate_psnr(img1, img2):
+    """
+    Calculate Peak Signal-to-Noise Ratio (PSNR).
+    """
+    mse = np.mean((img1.astype(np.float64) - img2.astype(np.float64)) ** 2)
+    if mse == 0:
+        return float('inf')
+    return 20 * np.log10(255.0 / np.sqrt(mse))
+
+def read_image(path, grayscale=True):
+    """
+    Read an image safely.
+    """
+    mode = cv2.IMREAD_GRAYSCALE if grayscale else cv2.IMREAD_COLOR
+    img = cv2.imread(path, mode)
+    if img is None:
+        raise FileNotFoundError(f"Image not found at {path}")
+    return img
