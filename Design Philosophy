@@ -1,0 +1,16 @@
+# Design Philosophy: Why Hybrid?
+
+## The Dilemma
+In high-density impulse noise removal, we face a contradiction:
+*   To remove outliers, we need **robust statistics** (like Median), but this ignores geometry.
+*   To preserve geometry, we need **gradients** (like PDE/Variational methods), but gradients are undefined on impulse noise.
+
+## The Solution: Decoupling
+I realized that we don't need to solve both problems simultaneously.
+1.  **Stage 1** solves the "outlier problem" using adaptive statistics. The result is geometrically imperfect but statistically clean.
+2.  **Stage 2** solves the "geometry problem" using Structure Tensors on the clean base.
+
+## Why Structure Tensors?
+Unlike simple gradient magnitude, the Structure Tensor (or Second Moment Matrix) provides a robust estimation of local orientation and coherence (anisotropy). This allows us to distinguish **edges** from **corners** and **flat regions**, enabling precise directional smoothing that reconnects broken edges.
+
+This project is my implementation of this "Decouple-and-Conquer" philosophy.
