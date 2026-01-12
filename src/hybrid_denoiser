@@ -1,0 +1,146 @@
+🐍 src/hybrid_denoiser.py
+
+代码保持你之前的逻辑，但加了更专业的注释。
+
+```python
+import numpy as np
+import cv2
+import time
+
+class HybridStructuralDenoiser:
+    """
+    Hybrid Two-Stage Restoration Algorithm.
+    
+    Stage 1: Statistical Filtering (Robustness)
+    Stage 2: Structure Tensor Refinement (Geometry)
+    """
+    
+    def __init__(self, config=None):
+        self.config = {
+            'base_window': 3,
+            'max_window': 7,
+            'refine_edges': True,
+            'edge_threshold': 0.3
+        }
+        if config:
+            self.config.update(config)
+
+    def process(self, noisy_img, noise_mask):
+        """
+        Main processing pipeline.
+        """
+        start_time = time.time()
+        h, w = noisy_img.shape
+        
+        # --- Stage 1: Robust Base Restoration ---
+        print("[Stage 1] Executing robust statistical filtering...")
+        base_restored = self._robust_base_restoration(noisy_img, noise_mask)
+        
+        # --- Stage 2: Structural Refinement ---
+        if self.config['refine_edges']:
+            print("[Stage 2] Computing structure tensors & refining edges...")
+            coherence, angle = self._compute_structure_tensor(base_restored)
+            final_img = self._directional_refinement(base_restored, noise_mask, coherence, angle)
+        else:
+            final_img = base_restored
+            
+        elapsed = time.time() - start_time
+        print(f"✅ Restoration complete in {elapsed:.3f}s")
+        return final_img
+
+    def _robust_base_restoration(self, img, mask):
+        """
+        Adaptive median-like filtering to remove outliers.
+        """
+        restored = img.copy()
+        noise_coords = np.argwhere(mask == 1)
+        
+        pad_r = self.config['max_window'] // 2
+        padded_img = cv2.copyMakeBorder(img, pad_r, pad_r, pad_r, pad_r, cv2.BORDER_REFLECT)
+        padded_mask = cv2.copyMakeBorder(mask, pad_r, pad_r, pad_r, pad_r, cv2.BORDER_CONSTANT, value=0)
+        
+        for y, x in noise_coords:
+            py, px = y + pad_r, x + pad_r
+            val = img[y, x]
+            
+            # Adaptive window search
+            for r in [1, 2, 3]: # 3x3, 5x5, 7x7
+                window = padded_img[py-r:py+r+1, px-r:px+r+1]
+                mask_win = padded_mask[py-r:py+r+1, px-r:px+r+1]
+                valid = window[mask_win == 0]
+                
+                if len(valid) >= 3:
+                    val = np.median(valid)
+                    break
+            restored[y, x] = val
+            
+        return restored
+
+    def _compute_structure_tensor(self, img):
+        """
+        Compute structure tensor eigenvalues and orientation.
+        """
+        img_f = img.astype(np.float32) / 255.0
+        
+        # Gradient computation (Scharr is more rotationally symmetric than Sobel)
+        Ix = cv2.Scharr(img_f, cv2.CV_32F, 1, 0)
+        Iy = cv2.Scharr(img_f, cv2.CV_32F, 0, 1)
+        
+        # Tensor components
+        Ix2 = cv2.GaussianBlur(Ix**2, (3,3), 1.0)
+        Iy2 = cv2.GaussianBlur(Iy**2, (3,3), 1.0)
+        Ixy = cv2.GaussianBlur(Ix*Iy, (3,3), 1.0)
+        
+        # Eigenvalue decomposition
+        trace = Ix2 + Iy2
+        det = Ix2*Iy2 - Ixy*Ixy
+        delta = np.sqrt(np.maximum(0, trace**2 - 4*det))
+        
+        l1 = (trace + delta) / 2.0
+        l2 = (trace - delta) / 2.0
+        
+        # Coherence: 1 = 1D structure (edge), 0 = isotropic
+        coherence = ((l1 - l2) / (l1 + l2 + 1e-6)) ** 2
+        
+        # Orientation
+        angle = 0.5 * np.arctan2(2*Ixy, Ix2 - Iy2)
+        
+        return coherence, angle
+
+    def _directional_refinement(self, img, mask, coherence, angle):
+        """
+        Apply directional smoothing along edges.
+        """
+        h, w = img.shape
+        refined = img.copy()
+        
+        # Only refine noisy pixels that are part of a structure
+        edge_mask = (coherence > self.config['edge_threshold']) & (mask == 1)
+        coords = np.argwhere(edge_mask)
+        
+        for y, x in coords:
+            # Tangent direction (perpendicular to gradient)
+            theta = angle[y, x] + np.pi/2
+            
+            # Sample along tangent
+            d = 1.5
+            dy, dx = d * np.sin(theta), d * np.cos(theta)
+            
+            # Nearest neighbor sampling (fast)
+            y1, x1 = int(round(y + dy)), int(round(x + dx))
+            y2, x2 = int(round(y - dy)), int(round(x - dx))
+            
+            # Bounds check
+            y1, x1 = np.clip(y1, 0, h-1), np.clip(x1, 0, w-1)
+            y2, x2 = np.clip(y2, 0, h-1), np.clip(x2, 0, w-1)
+            
+            # Directional average
+            v_center = img[y, x]
+            v1 = img[y1, x1]
+            v2 = img[y2, x2]
+            
+            # Weighted blend
+            new_val = 0.5 * v_center + 0.25 * v1 + 0.25 * v2
+            refined[y, x] = np.clip(new_val, 0, 255)
+            
+        return refined
